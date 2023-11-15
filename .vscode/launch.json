@@ -8,7 +8,7 @@
 
 		{
 			"name": "Run Extension",
-			"type": "extensionHost",
+			"type": "pwa-extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}"
@@ -16,11 +16,14 @@
 			"outFiles": [
 				"${workspaceFolder}/dist/**/*.js"
 			],
+            "env": {
+                "USE_DEBUGPY": "True"
+            },
 			"preLaunchTask": "${defaultBuildTask}"
 		},
 		{
 			"name": "Extension Tests",
-			"type": "extensionHost",
+			"type": "pwa-extensionHost",
 			"request": "launch",
 			"args": [
 				"--extensionDevelopmentPath=${workspaceFolder}",

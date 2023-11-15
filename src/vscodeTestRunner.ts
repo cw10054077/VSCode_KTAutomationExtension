@@ -2,13 +2,14 @@
  * Copyright (C) Microsoft Corporation. All rights reserved.
  *--------------------------------------------------------*/
 
+import { PythonExtension } from '@vscode/python-extension';
 import { spawn } from 'child_process';
 import { promises as fs } from 'fs';
 import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { itemData, TestCase, TestFile, TestSuite } from './testTree';
+import { TestCase, TestFile, TestSuite, itemData } from './testTree';
 
 /**
  * From MDN
@@ -22,38 +23,146 @@ const TEST_BROWSER_SCRIPT_PATH = 'test/unit/browser/index.js';
 const ATTACH_CONFIG_NAME = 'Attach to VS Code';
 const DEBUG_TYPE = 'pwa-chrome';
 
+class debugConfig implements vscode.DebugConfiguration {
+    [key: string]: any;
+    type: string;
+    name: string;
+    request: string;
+    // module: string;
+    // args: string[];
+    // subProcess: boolean;
+    connect: {
+        host: string;
+        port: number;
+    };
+
+    constructor() {
+        // this.key = 'KT Debug Config';
+        this.name = 'KT Debug Config';
+        this.type = 'python';
+        this.request = 'attach';
+        // this.module = 'main';
+        // this.args = args;
+        // this.subProcess = true;
+        this.connect = {
+            host: 'localhost',
+            port: 5678
+        };
+    }
+
+}
+
 export abstract class VSCodeTestRunner {
   constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
 
   public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
     const args = this.prepareArguments(baseArgs, filter);
-    const cp = spawn(await this.binaryPath(), args, {
-      cwd: this.repoLocation.uri.fsPath,
-      stdio: 'pipe',
+
+    const pythonApi: PythonExtension = await PythonExtension.api();
+    const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
+    const testList: string[] = [];
+
+    const findTests = (t: vscode.TestItem) => {
+        if (t.canResolveChildren) {
+            t.children.forEach(item => findTests(item))
+        } else {
+            testList.push(t.id)
+        }
+    };
+    
+    if (filter) {
+        
+        for (const [index, item] of filter.entries()) {
+            findTests(item)
+        }
+    }
+
+    console.log('Final List:')
+    console.log(testList.toString())
+    console.log(JSON.stringify(testList))
+
+    const runMain = spawn(
+        environmentPath.path,
+        [path.join(this.repoLocation.uri.fsPath, `main.py`), '-tests', JSON.stringify(testList)], 
+    {
       env: this.getEnvironment(),
     });
 
-    return new TestOutputScanner(cp, args);
+    // const cp = spawn(await this.binaryPath(), args, {
+    //   cwd: this.repoLocation.uri.fsPath,
+    //   stdio: 'pipe',
+    //   env: this.getEnvironment(),
+    // });
+
+    console.log('Spawn Args')
+    console.log(runMain.spawnargs)
+
+    return new TestOutputScanner(runMain, undefined);
   }
 
   public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
     const server = this.createWaitServer();
-    const args = [
-      ...this.prepareArguments(baseArgs, filter),
-      '--remote-debugging-port=9222',
-      // for breakpoint freeze: https://github.com/microsoft/vscode/issues/122225#issuecomment-885377304
-      '--js-flags="--regexp_interpret_all"',
-      // for general runtime freezes: https://github.com/microsoft/vscode/issues/127861#issuecomment-904144910
-      '--disable-features=CalculateNativeWinOcclusion',
-      '--timeout=0',
-      `--waitServer=${server.port}`,
-    ];
 
-    const cp = spawn(await this.binaryPath(), args, {
-      cwd: this.repoLocation.uri.fsPath,
-      stdio: 'pipe',
-      env: this.getEnvironment(),
-    });
+    const testList: string[] = [];
+
+    const findTests = (t: vscode.TestItem) => {
+        if (t.canResolveChildren) {
+            t.children.forEach(item => findTests(item))
+        } else {
+            testList.push(t.id)
+        }
+    };
+    
+    if (filter) {
+        
+        for (const [index, item] of filter.entries()) {
+            findTests(item)
+        }
+    }
+
+    const pythonApi: PythonExtension = await PythonExtension.api();
+    console.log(await pythonApi.debug.getDebuggerPackagePath())
+    const debugCmds = await (await pythonApi.debug.getRemoteLauncherCommand('localhost', 5678, true))
+        // .concat([
+        //     '-m',
+        //     'main'
+        // ])
+    // .concat([
+    //     path.join(this.repoLocation.uri.fsPath, `main.py`), 
+    //     '-tests', JSON.stringify(testList)
+    // ])
+
+    const args2 = [
+        // '-m', 'debugpy',
+        '/Users/cw10054077/.vscode/extensions/ms-python.python-2023.20.0/pythonFiles/lib/python/debugpy/adapter/../../debugpy/launcher',
+        // '--listen', '59790',
+        '5678',
+        '--',
+        path.join(this.repoLocation.uri.fsPath, `main.py`), 
+        '-tests', JSON.stringify(testList)
+    ]
+
+    
+
+    // console.log(debugCmds)
+    
+    const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
+    const debugMain = spawn(
+        environmentPath.path,
+        debugCmds, 
+        {
+            env: this.getEnvironment(),
+        }
+    );
+        
+    console.log('Debug Args:')
+    console.log(debugMain.spawnargs)
+
+    // const cp = spawn(await this.binaryPath(), args, {
+    //   cwd: this.repoLocation.uri.fsPath,
+    //   stdio: 'pipe',
+    //   env: this.getEnvironment(),
+    // });
 
     // Register a descriptor factory that signals the server when any
     // breakpoint set requests on the debugee have been completed.
@@ -84,11 +193,13 @@ export abstract class VSCodeTestRunner {
       },
     });
 
-    vscode.debug.startDebugging(this.repoLocation, ATTACH_CONFIG_NAME);
+    const pythonDebug = new debugConfig()
+
+    vscode.debug.startDebugging(this.repoLocation, pythonDebug);
 
     let exited = false;
     let rootSession: vscode.DebugSession | undefined;
-    cp.once('exit', () => {
+    debugMain.once('exit', () => {
       exited = true;
       server.dispose();
       listener.dispose();
@@ -100,7 +211,7 @@ export abstract class VSCodeTestRunner {
     });
 
     const listener = vscode.debug.onDidStartDebugSession(s => {
-      if (s.name === ATTACH_CONFIG_NAME && !rootSession) {
+      if (s.name === pythonDebug.name && !rootSession) {
         if (exited) {
           vscode.debug.stopDebugging(rootSession);
         } else {
@@ -109,7 +220,7 @@ export abstract class VSCodeTestRunner {
       }
     });
 
-    return new TestOutputScanner(cp, args);
+    return new TestOutputScanner(debugMain, undefined);
   }
 
   protected getEnvironment(): NodeJS.ProcessEnv {
@@ -236,6 +347,18 @@ export class WindowsTestRunner extends VSCodeTestRunner {
   protected getDefaultArgs() {
     return [TEST_ELECTRON_SCRIPT_PATH];
   }
+}
+
+export class KTTestRunner extends VSCodeTestRunner {
+    
+    protected async binaryPath(): Promise<string> {
+        return ''
+    }
+
+    protected getDefaultArgs(): string[] {
+        return []
+    }
+
 }
 
 export class PosixTestRunner extends VSCodeTestRunner {

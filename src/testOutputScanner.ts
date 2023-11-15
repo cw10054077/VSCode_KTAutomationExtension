@@ -3,10 +3,10 @@
  *--------------------------------------------------------*/
 
 import {
-  GREATEST_LOWER_BOUND,
-  LEAST_UPPER_BOUND,
-  originalPositionFor,
-  TraceMap,
+    GREATEST_LOWER_BOUND,
+    LEAST_UPPER_BOUND,
+    originalPositionFor,
+    TraceMap,
 } from '@jridgewell/trace-mapping';
 import styles from 'ansi-styles';
 import { ChildProcessWithoutNullStreams } from 'child_process';
@@ -16,6 +16,33 @@ import * as vscode from 'vscode';
 import { attachTestMessageMetadata } from './metadata';
 import { snapshotComment } from './snapshot';
 import { getContentFromFilesystem } from './testTree';
+
+export const enum KTAutoEvent {
+    SuiteStart = 'suiteStart',
+    TestStart = 'testStart',
+    TestEvent = 'testEvent',
+    TestStop = 'testStop',
+    SuiteEnd = 'suiteStop',
+  }
+
+export interface IKTTestEvent {
+    _name: string;
+    _log_msg: { _msg_list: string[] };
+    _event_type: number;
+    _status: number;
+    _attempts: number;
+    _execution_time: number;
+    _start_time: number;
+    _exceptions: string[];
+    _request: string;
+    _return_values: string[]
+  }
+
+export type KTEventTuple =
+  | [string, IKTTestEvent]
+  | [KTAutoEvent.SuiteStart, IKTTestEvent];
+
+
 
 export const enum MochaEvent {
   Start = 'start',
@@ -36,6 +63,8 @@ export interface ITestStartEvent {
   currentRetry: number;
   speed: string;
 }
+
+
 
 export interface IPassEvent extends ITestStartEvent {
   duration: number;
@@ -70,8 +99,14 @@ export type MochaEventTuple =
 
 export class TestOutputScanner implements vscode.Disposable {
   protected mochaEventEmitter = new vscode.EventEmitter<MochaEventTuple>();
+  protected ktAutoEventEmitter = new vscode.EventEmitter<KTEventTuple>();
   protected outputEventEmitter = new vscode.EventEmitter<string>();
   protected onErrorEmitter = new vscode.EventEmitter<string>();
+
+  /**
+   * Fired when a KT Automation event comes in.
+   */
+  public readonly onKTAutoEvent = this.ktAutoEventEmitter.event;
 
   /**
    * Fired when a mocha event comes in.
@@ -113,13 +148,19 @@ export class TestOutputScanner implements vscode.Disposable {
     }
 
     try {
-      const parsed = JSON.parse(data) as unknown;
+      console.log(data)
+      const parsed = JSON.parse(data);
+    //   console.log(parsed)
+    //   if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {
+    //     this.mochaEventEmitter.fire(parsed as MochaEventTuple);
       if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {
-        this.mochaEventEmitter.fire(parsed as MochaEventTuple);
+        this.ktAutoEventEmitter.fire(parsed as KTEventTuple)
       } else {
         this.outputEventEmitter.fire(data);
       }
-    } catch {
+    } catch(e) {
+      console.log('Parse failed')
+    //   console.log(e)
       this.outputEventEmitter.fire(data);
     }
   };
@@ -173,6 +214,16 @@ export async function scanTestOutput(
       });
 
       scanner.onOtherOutput(str => {
+        const tItem = tests.get('DOTNETMC_T224')
+
+        if (tItem) {
+            try {
+                skippedTests.delete(tItem);
+            } catch {
+                
+            }
+            task.passed(tItem, 1000)
+        }
         const match = spdlogRe.exec(str);
         if (!match) {
           enqueueOutput(str + crlf);
@@ -191,6 +242,27 @@ export async function scanTestOutput(
           ])
         );
       });
+
+      scanner.onKTAutoEvent(evt => {
+        const testId = evt[0]
+        const eventData = evt[1]
+        const tItem = tests.get(testId)
+
+        if (tItem) {
+            skippedTests.delete(tItem);
+
+            if (eventData._request.includes('****** Ending Test Case ******')) {
+                console.log('Test ' + testId + ' Passed')
+                task.passed(tItem, eventData._execution_time * 1000)
+            }
+        }
+
+        const match = spdlogRe.exec(eventData._request);
+        if (!match) {
+          enqueueOutput(eventData._request + crlf);
+          return;
+        }
+      })
 
       scanner.onMochaEvent(evt => {
         switch (evt[0]) {
