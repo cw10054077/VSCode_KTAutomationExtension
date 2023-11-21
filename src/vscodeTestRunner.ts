@@ -9,7 +9,6 @@ import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { TestOutputScanner } from './testOutputScanner';
-import { TestCase, TestFile, TestSuite, itemData } from './testTree';
 
 /**
  * From MDN
@@ -17,82 +16,66 @@ import { TestCase, TestFile, TestSuite, itemData } from './testTree';
  */
 const escapeRe = (s: string) => s.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
 
-const TEST_ELECTRON_SCRIPT_PATH = 'test/unit/electron/index.js';
-const TEST_BROWSER_SCRIPT_PATH = 'test/unit/browser/index.js';
+const DEBUGPY_HOST = 'localhost';
+const DEBUGPY_PORT = 5678;
 
-const ATTACH_CONFIG_NAME = 'Attach to VS Code';
-const DEBUG_TYPE = 'pwa-chrome';
-
-// listen/connect are mutually exclusive. If the vscode configuration is listen, then the debugpy arguments
-// must use connect. And vice-versa.
 class debugConfig implements vscode.DebugConfiguration {
-    // [key: string]: any;
     type: string;
     name: string;
     request: string;
-    listen: {
-        port: number;
-        host: string;
-    }
-    // module: string;
-    // args: string[];
     subProcess: boolean;
-    // connect: {
-    //     host: string;
-    //     port: number;
-    // };
+    connect: {
+        host: string;
+        port: number;
+    };
 
     constructor() {
-        // this.key = 'KT Debug Config';
         this.name = 'Python: Remote Attach';
         this.type = 'python';
         this.request = 'attach';
-        this.listen = {
-            port: 5678,
-            host: 'localhost'
-        }
-        // this.module = 'main';
-        // this.args = args;
         this.subProcess = true;
-        // this.connect = {
-        //     host: '127.0.0.1',
-        //     port: 5678
-        // };
+        this.connect = {
+            host: DEBUGPY_HOST,
+            port: DEBUGPY_PORT
+        };
     }
 
 }
 
-export abstract class VSCodeTestRunner {
+// Recursively iterate through the Test Tree's heirarchy and build a flat list of each test's ID
+const getTestIDsFromTestItemTree = (filter?: ReadonlyArray<vscode.TestItem>): string[] => {
+    const tempList: string[] = [];
+
+    const findTests = (t: vscode.TestItem) => {
+        if (t.canResolveChildren) {
+            t.children.forEach(item => findTests(item))
+        } else {
+            tempList.push(t.id)
+        }
+    };
+
+    if (filter) {
+        for (const item of filter.values()) {
+            findTests(item)
+        }
+    }
+
+    return tempList;
+}
+
+export class VSCodeTestRunner {
     constructor(protected readonly repoLocation: vscode.WorkspaceFolder) {}
 
+    /**
+     * Run the Automation Framework with the tests contained within filter. 
+     */
     public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
-        const args = this.prepareArguments(baseArgs, filter);
-
         const pythonApi: PythonExtension = await PythonExtension.api();
         const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
-        const testList: string[] = [];
+        const testList = getTestIDsFromTestItemTree(filter);
 
-        const findTests = (t: vscode.TestItem) => {
-            if (t.canResolveChildren) {
-                t.children.forEach(item => findTests(item))
-            } else {
-                testList.push(t.id)
-            }
-        };
-        
-        if (filter) {
-                
-            for (const [index, item] of filter.entries()) {
-                findTests(item)
-            }
-        }
-
-        console.log('Final List:')
-        console.log(testList.toString())
-        console.log(JSON.stringify(testList))
-        // console.log('getEnvironment()')
-        // console.log(this.getEnvironment())
-
+        // Run the framework using the currently active python environment.
+        // Pass in the testID's and other configurations.
         const runMain = spawn(
                 environmentPath.path,
                 [path.join(this.repoLocation.uri.fsPath, `main.py`), '-tests', JSON.stringify(testList)], 
@@ -101,83 +84,35 @@ export abstract class VSCodeTestRunner {
             cwd: this.repoLocation.uri.fsPath
         });
 
-        // const cp = spawn(await this.binaryPath(), args, {
-        //     cwd: this.repoLocation.uri.fsPath,
-        //     stdio: 'pipe',
-        //     env: this.getEnvironment(),
-        // });
-
-        console.log('Spawn Args')
-        console.log(runMain.spawnargs)
-
         return new TestOutputScanner(runMain, undefined);
     }
 
     public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
         const server = this.createWaitServer();
 
-        const testList: string[] = [];
-
-        const findTests = (t: vscode.TestItem) => {
-            if (t.canResolveChildren) {
-                t.children.forEach(item => findTests(item))
-            } else {
-                testList.push(t.id)
-            }
-        };
-        
-        if (filter) {
-                
-            for (const [index, item] of filter.entries()) {
-                findTests(item)
-            }
-        }
-
-
-                // .concat([
-                //         '-m',
-                //         'main'
-                // ])
-        // .concat([
-        //         path.join(this.repoLocation.uri.fsPath, `main.py`), 
-        //         '-tests', JSON.stringify(testList)
-        // ])
-
-        const args2 = [
-            '/Users/cw10054077/.vscode/extensions/ms-python.python-2023.20.0/pythonFiles/lib/python/debugpy/launcher',
-            'localhost:5678',
-            '--',
-            path.join(this.repoLocation.uri.fsPath, `main.py`), 
-            '-tests', JSON.stringify(testList)
-        ]
+        const testList = getTestIDsFromTestItemTree(filter);
 
         const pythonApi: PythonExtension = await PythonExtension.api();
-        console.log(await pythonApi.debug.getDebuggerPackagePath())
-        const debugCmds = await (await pythonApi.debug.getRemoteLauncherCommand('127.0.0.1', 5678, true))
-
-        const debugCmds2 = debugCmds.concat([
-            '--log-to-stderr',
+        const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
+        let debugCmd = await (await pythonApi.debug.getRemoteLauncherCommand(DEBUGPY_HOST, DEBUGPY_PORT, true))
+        
+        debugCmd = debugCmd.concat([
             path.join(this.repoLocation.uri.fsPath, `main.py`), 
             '-tests', JSON.stringify(testList)
-            // '-Xfrozen_modules=off'
         ])
 
-        debugCmds2[1] = '--connect';
-
-        const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
         const debugMain = spawn(
                 environmentPath.path,
-                debugCmds2, 
+                debugCmd, 
                 {
                         env: this.getEnvironment(),
                         cwd: this.repoLocation.uri.fsPath,
                         stdio: 'pipe'
                 }
         );
-        
-                
-        console.log('Debug Args:')
-        console.log(debugMain.spawnargs)
+        // Debugpy's server needs a few seconds to setup before VSCode can attach. 
+        // Could not find way to make VSCode dynamically wait until debugpy was ready.
+        await new Promise(r => setTimeout(r, 1000));
 
         // Register a descriptor factory that signals the server when any
         // breakpoint set requests on the debugee have been completed.
@@ -209,44 +144,7 @@ export abstract class VSCodeTestRunner {
         });
 
         const pythonDebug = new debugConfig();
-        // pythonDebug.connect.port = 5678;
-
-        debugMain.once('message', (event) => {
-            console.log('debugMain Message');
-            console.log(event);
-
-            // console.log('Started Debugging')
-            // vscode.debug.startDebugging(this.repoLocation, pythonDebug).then(() => {
-            //     console.log('Successfully Started Debugging');
-            // });
-        });
-
-
-        
-        console.log('Started Debugging')
-        vscode.debug.startDebugging(this.repoLocation, pythonDebug).then(() => {
-            console.log('Successfully Started Debugging');
-        });
-
-        debugMain.once('spawn', () => {
-            console.log('Spawned CLI for Debugpy')
-
-        });
-        // debugCmds2[1] = '--connect';
-
-        // const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
-        // const debugMain = spawn(
-        //         environmentPath.path,
-        //         debugCmds2, 
-        //         {
-        //                 env: this.getEnvironment(),
-        //                 cwd: this.repoLocation.uri.fsPath,
-        //                 stdio: 'pipe'
-        //         }
-        // );
-                
-        // console.log('Debug Args:')
-        // console.log(debugMain.spawnargs)
+        vscode.debug.startDebugging(this.repoLocation, pythonDebug);
 
         let exited = false;
         let rootSession: vscode.DebugSession | undefined;
@@ -277,60 +175,14 @@ export abstract class VSCodeTestRunner {
     protected getEnvironment(): NodeJS.ProcessEnv {
         return {
             ...process.env,
-            PYDEVD_DISABLE_FILE_VALIDATION: '1'
-            // PATH: process.env.PATH + ':/Users/cw10054077/Repositories/AutomationFramework/downloads/chromedriver-mac-x64/',
-            // VSCODE_CWD: this.repoLocation.uri.fsPath,
-            // PWD: this.repoLocation.uri.fsPath
-        //     ELECTRON_RUN_AS_NODE: undefined,
-        //     ELECTRON_ENABLE_LOGGING: '1',
+            PYDEVD_DISABLE_FILE_VALIDATION: '1',
+            PYTHONUNBUFFERED: '1'
         };
     }
 
-    private prepareArguments(
-        baseArgs: ReadonlyArray<string>,
-        filter?: ReadonlyArray<vscode.TestItem>
-    ) {
-        const args = [...this.getDefaultArgs(), ...baseArgs, '--reporter', 'full-json-stream'];
-        if (!filter) {
-            return args;
-        }
+    // protected abstract getDefaultArgs(): string[];
 
-        const grepRe: string[] = [];
-        const runPaths = new Set<string>();
-        const addTestFileRunPath = (data: TestFile) =>
-            runPaths.add(
-                path.relative(data.workspaceFolder.uri.fsPath, data.uri.fsPath).replace(/\\/g, '/')
-            );
-
-        for (const test of filter) {
-            const data = itemData.get(test);
-            if (data instanceof TestCase || data instanceof TestSuite) {
-                grepRe.push(escapeRe(data.fullName) + (data instanceof TestCase ? '$' : ' '));
-                for (let p = test.parent; p; p = p.parent) {
-                    const parentData = itemData.get(p);
-                    if (parentData instanceof TestFile) {
-                        addTestFileRunPath(parentData);
-                    }
-                }
-            } else if (data instanceof TestFile) {
-                addTestFileRunPath(data);
-            }
-        }
-
-        if (grepRe.length) {
-            args.push('--grep', `/^(${grepRe.join('|')})/`);
-        }
-
-        if (runPaths.size) {
-            args.push(...[...runPaths].flatMap(p => ['--run', p]));
-        }
-
-        return args;
-    }
-
-    protected abstract getDefaultArgs(): string[];
-
-    protected abstract binaryPath(): Promise<string>;
+    // protected abstract binaryPath(): Promise<string>;
 
     protected async readProductJson() {
         const projectJson = await fs.readFile(
@@ -370,89 +222,3 @@ export abstract class VSCodeTestRunner {
         };
     }
 }
-
-export class BrowserTestRunner extends VSCodeTestRunner {
-    /** @override */
-    protected binaryPath(): Promise<string> {
-        return Promise.resolve(process.execPath);
-    }
-
-    /** @override */
-    protected getEnvironment() {
-        return {
-            ...super.getEnvironment(),
-            ELECTRON_RUN_AS_NODE: '1',
-        };
-    }
-
-    /** @override */
-    protected getDefaultArgs() {
-        return [TEST_BROWSER_SCRIPT_PATH];
-    }
-}
-
-export class WindowsTestRunner extends VSCodeTestRunner {
-    /** @override */
-    protected async binaryPath() {
-        const { nameShort } = await this.readProductJson();
-        return path.join(this.repoLocation.uri.fsPath, `.build/electron/${nameShort}.exe`);
-    }
-
-    /** @override */
-    protected getDefaultArgs() {
-        return [TEST_ELECTRON_SCRIPT_PATH];
-    }
-}
-
-export class KTTestRunner extends VSCodeTestRunner {
-        
-        protected async binaryPath(): Promise<string> {
-                return ''
-        }
-
-        protected getDefaultArgs(): string[] {
-                return []
-        }
-
-}
-
-export class PosixTestRunner extends VSCodeTestRunner {
-    /** @override */
-    protected async binaryPath() {
-        const { applicationName } = await this.readProductJson();
-        return path.join(this.repoLocation.uri.fsPath, `.build/electron/${applicationName}`);
-    }
-
-    /** @override */
-    protected getDefaultArgs() {
-        return [TEST_ELECTRON_SCRIPT_PATH];
-    }
-}
-
-export class DarwinTestRunner extends PosixTestRunner {
-    /** @override */
-    protected getDefaultArgs() {
-        return [
-            TEST_ELECTRON_SCRIPT_PATH,
-            '--no-sandbox',
-            '--disable-dev-shm-usage',
-            '--use-gl=swiftshader',
-        ];
-    }
-
-    /** @override */
-    protected async binaryPath() {
-        const { nameLong } = await this.readProductJson();
-        return path.join(
-            this.repoLocation.uri.fsPath,
-            `.build/electron/${nameLong}.app/Contents/MacOS/Electron`
-        );
-    }
-}
-
-export const PlatformTestRunner =
-    process.platform === 'win32'
-        ? WindowsTestRunner
-        : process.platform === 'darwin'
-        ? DarwinTestRunner
-        : PosixTestRunner;

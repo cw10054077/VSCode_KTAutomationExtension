@@ -16,9 +16,7 @@ import {
     TestSuite,
     VSCodeTest,
 } from './testTree';
-import { BrowserTestRunner, KTTestRunner, PlatformTestRunner, VSCodeTestRunner } from './vscodeTestRunner';
-
-
+import { VSCodeTestRunner } from './vscodeTestRunner';
 
 const TEST_FOLDER = '_TestItem'
 const TEST_FILE_PATTERN = '_TestItem/TestCases/**/*.py';
@@ -28,12 +26,6 @@ const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
     (uri.path.endsWith('.py') && uri.path.includes(TEST_FOLDER))
         ? vscode.workspace.getWorkspaceFolder(uri)
         : undefined;
-
-const browserArgs: [name: string, arg: string][] = [
-    ['Chrome', 'chromium'],
-    ['Firefox', 'firefox'],
-    ['Webkit', 'webkit'],
-];
 
 type FileChangeEvent = { uri: vscode.Uri; removed: boolean };
 
@@ -150,53 +142,22 @@ export async function activate(context: vscode.ExtensionContext) {
     };
 
     ctrl.createRunProfile(
-        'Run in Electron',
+        'Run KT Python Framework',
         vscode.TestRunProfileKind.Run,
-        createRunHandler(PlatformTestRunner, false),
+        createRunHandler(VSCodeTestRunner, false),
         true,
         undefined,
         true
     );
-
-    // ctrl.createRunProfile(
-    //     'Debug in Electron',
-    //     vscode.TestRunProfileKind.Debug,
-    //     createRunHandler(PlatformTestRunner, true),
-    //     true,
-    //     undefined,
-    //     true
-    // );
 
     ctrl.createRunProfile(
         'Debug KT Python Framework',
         vscode.TestRunProfileKind.Debug,
-        createRunHandler(KTTestRunner, true),
+        createRunHandler(VSCodeTestRunner, true),
         true,
         undefined,
         true
     );
-
-    for (const [name, arg] of browserArgs) {
-        const cfg = ctrl.createRunProfile(
-            `Run in ${name}`,
-            vscode.TestRunProfileKind.Run,
-            createRunHandler(BrowserTestRunner, false, [' --browser', arg]),
-            undefined,
-            undefined,
-            true
-        );
-
-        cfg.configureHandler = () => vscode.window.showInformationMessage(`Configuring ${name}`);
-
-        ctrl.createRunProfile(
-            `Debug in ${name}`,
-            vscode.TestRunProfileKind.Debug,
-            createRunHandler(BrowserTestRunner, false, ['--browser', arg, '--debug-browser']),
-            undefined,
-            undefined,
-            true
-        );
-    }
 
     // Get or generate TestFile for a given text document, then generate/update TestCases for that TestFile.
     function updateNodeForDocument(e: vscode.TextDocument) {
@@ -276,8 +237,6 @@ async function startWatchingWorkspace(
     if (!workspaceFolder) {
         return new vscode.Disposable(() => undefined);
     }
-
-
 
     const pattern = new vscode.RelativePattern(workspaceFolder, TEST_FILE_PATTERN);
     const watcher = vscode.workspace.createFileSystemWatcher(pattern);

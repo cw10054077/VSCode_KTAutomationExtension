@@ -13,6 +13,7 @@ import { ChildProcessWithoutNullStreams } from 'child_process';
 import { decode as base64Decode } from 'js-base64';
 import * as split from 'split2';
 import * as vscode from 'vscode';
+import { TestMessage } from 'vscode';
 import { attachTestMessageMetadata } from './metadata';
 import { snapshotComment } from './snapshot';
 import { getContentFromFilesystem } from './testTree';
@@ -39,55 +40,55 @@ export interface IKTTestEvent {
   }
 
 export type KTEventTuple =
-  | [string, IKTTestEvent]
-  | [KTAutoEvent.SuiteStart, IKTTestEvent];
+    | [string, IKTTestEvent]
+    | [KTAutoEvent.SuiteStart, IKTTestEvent];
 
 
 
 export const enum MochaEvent {
-  Start = 'start',
-  TestStart = 'testStart',
-  Pass = 'pass',
-  Fail = 'fail',
-  End = 'end',
+    Start = 'start',
+    TestStart = 'testStart',
+    Pass = 'pass',
+    Fail = 'fail',
+    End = 'end',
 }
 
 export interface IStartEvent {
-  total: number;
+    total: number;
 }
 
 export interface ITestStartEvent {
-  title: string;
-  fullTitle: string;
-  file: string;
-  currentRetry: number;
-  speed: string;
+    title: string;
+    fullTitle: string;
+    file: string;
+    currentRetry: number;
+    speed: string;
 }
 
 
 
 export interface IPassEvent extends ITestStartEvent {
-  duration: number;
+    duration: number;
 }
 
 export interface IFailEvent extends IPassEvent {
-  err: string;
-  stack: string | null;
-  expected?: string;
-  actual?: string;
-  expectedJSON?: unknown;
-  actualJSON?: unknown;
-  snapshotPath?: string;
-}
+    err: string;
+    stack: string | null;
+    expected?: string;
+    actual?: string;
+    expectedJSON?: unknown;
+    actualJSON?: unknown;
+    snapshotPath?: string;
+    }
 
 export interface IEndEvent {
-  suites: number;
-  tests: number;
-  passes: number;
-  pending: number;
-  failures: number;
-  start: string /* ISO date */;
-  end: string /* ISO date */;
+    suites: number;
+    tests: number;
+    passes: number;
+    pending: number;
+    failures: number;
+    start: string /* ISO date */;
+    end: string /* ISO date */;
 }
 
 export type MochaEventTuple =
@@ -98,291 +99,290 @@ export type MochaEventTuple =
   | [MochaEvent.End, IEndEvent];
 
 export class TestOutputScanner implements vscode.Disposable {
-  protected mochaEventEmitter = new vscode.EventEmitter<MochaEventTuple>();
-  protected ktAutoEventEmitter = new vscode.EventEmitter<KTEventTuple>();
-  protected outputEventEmitter = new vscode.EventEmitter<string>();
-  protected onErrorEmitter = new vscode.EventEmitter<string>();
+    protected mochaEventEmitter = new vscode.EventEmitter<MochaEventTuple>();
+    protected ktAutoEventEmitter = new vscode.EventEmitter<KTEventTuple>();
+    protected outputEventEmitter = new vscode.EventEmitter<string>();
+    protected onErrorEmitter = new vscode.EventEmitter<string>();
 
-  /**
-   * Fired when a KT Automation event comes in.
-   */
-  public readonly onKTAutoEvent = this.ktAutoEventEmitter.event;
+    /**
+     * Fired when a KT Automation event comes in.
+     */
+    public readonly onKTAutoEvent = this.ktAutoEventEmitter.event;
 
-  /**
-   * Fired when a mocha event comes in.
-   */
-  public readonly onMochaEvent = this.mochaEventEmitter.event;
+    /**
+     * Fired when a mocha event comes in.
+     */
+    public readonly onMochaEvent = this.mochaEventEmitter.event;
 
-  /**
-   * Fired when other output from the process comes in.
-   */
-  public readonly onOtherOutput = this.outputEventEmitter.event;
+    /**
+     * Fired when other output from the process comes in.
+     */
+    public readonly onOtherOutput = this.outputEventEmitter.event;
 
-  /**
-   * Fired when the process encounters an error, or exits.
-   */
-  public readonly onRunnerError = this.onErrorEmitter.event;
+    /**
+     * Fired when the process encounters an error, or exits.
+     */
+    public readonly onRunnerError = this.onErrorEmitter.event;
 
-  constructor(private readonly process: ChildProcessWithoutNullStreams, private args?: string[]) {
-    process.stdout.pipe(split()).on('data', this.processData);
-    process.stderr.pipe(split()).on('data', this.processData);
-    process.on('error', e => this.onErrorEmitter.fire(e.message));
-    process.on('exit', code => this.onErrorEmitter.fire(`Test process exited with code ${code}`));
-  }
+    constructor(private readonly process: ChildProcessWithoutNullStreams, private args?: string[]) {
+        process.stdout.pipe(split()).on('data', this.processData);
+        process.stderr.pipe(split()).on('data', this.processData);
+        process.on('error', e => this.onErrorEmitter.fire(e.message));
+        process.on('exit', code => this.onErrorEmitter.fire(`Test process exited with code ${code}`));
+    }
 
-  /**
-   * @override
-   */
-  public dispose() {
+    /**
+     * @override
+     */
+    public dispose() {
+        try {
+            this.process.kill();
+        } catch {
+            // ignored
+        }
+    }
+
+    protected readonly processData = (data: string) => {
+
+        try {
+            const parsed = JSON.parse(data);
+            console.log(parsed)
+            if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {
+                this.ktAutoEventEmitter.fire(parsed as KTEventTuple)
+            } else {
+                this.outputEventEmitter.fire(data);
+            }
+        } catch(e) {
+            this.outputEventEmitter.fire(data);
+        }
+    };
+    }
+
+    type QueuedOutput = string | [string, vscode.Location | undefined, vscode.TestItem | undefined];
+
+    export async function scanTestOutput(
+    tests: Map<string, vscode.TestItem>,
+    task: vscode.TestRun,
+    scanner: TestOutputScanner,
+    cancellation: vscode.CancellationToken
+    ): Promise<void> {
+    const exitBlockers: Set<Promise<unknown>> = new Set();
+    const skippedTests = new Set(tests.values());
+    const store = new SourceMapStore();
+    let outputQueue = Promise.resolve();
+    const enqueueOutput = (fn: QueuedOutput | (() => Promise<QueuedOutput>)) => {
+        exitBlockers.delete(outputQueue);
+        outputQueue = outputQueue.finally(async () => {
+        const r = typeof fn === 'function' ? await fn() : fn;
+        typeof r === 'string' ? task.appendOutput(r) : task.appendOutput(...r);
+        });
+        exitBlockers.add(outputQueue);
+        return outputQueue;
+    };
+    const enqueueExitBlocker = <T>(prom: Promise<T>): Promise<T> => {
+        exitBlockers.add(prom);
+        prom.finally(() => exitBlockers.delete(prom));
+        return prom;
+    };
+
+    let lastTest: vscode.TestItem | undefined;
+    let ranAnyTest = false;
+
     try {
-      this.process.kill();
-    } catch {
-      // ignored
-    }
-  }
+        if (cancellation.isCancellationRequested) {
+            return;
+        }
 
-  protected readonly processData = (data: string) => {
-    if (this.args) {
-      this.outputEventEmitter.fire(`./scripts/test ${this.args.join(' ')}`);
-      this.args = undefined;
-    }
+        await new Promise<void>(resolve => {
+        cancellation.onCancellationRequested(() => {
+            resolve();
+        });
 
-    try {
-      console.log(data)
-      const parsed = JSON.parse(data);
-    //   console.log(parsed)
-    //   if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {
-    //     this.mochaEventEmitter.fire(parsed as MochaEventTuple);
-      if (parsed instanceof Array && parsed.length === 2 && typeof parsed[0] === 'string') {
-        this.ktAutoEventEmitter.fire(parsed as KTEventTuple)
-      } else {
-        this.outputEventEmitter.fire(data);
-      }
-    } catch(e) {
-      console.log('Parse failed')
-    //   console.log(e)
-      this.outputEventEmitter.fire(data);
-    }
-  };
-}
+        let currentTest: vscode.TestItem | undefined;
 
-type QueuedOutput = string | [string, vscode.Location | undefined, vscode.TestItem | undefined];
+        scanner.onRunnerError(err => {
+            enqueueOutput(err + crlf);
+            resolve();
+        });
 
-export async function scanTestOutput(
-  tests: Map<string, vscode.TestItem>,
-  task: vscode.TestRun,
-  scanner: TestOutputScanner,
-  cancellation: vscode.CancellationToken
-): Promise<void> {
-  const exitBlockers: Set<Promise<unknown>> = new Set();
-  const skippedTests = new Set(tests.values());
-  const store = new SourceMapStore();
-  let outputQueue = Promise.resolve();
-  const enqueueOutput = (fn: QueuedOutput | (() => Promise<QueuedOutput>)) => {
-    exitBlockers.delete(outputQueue);
-    outputQueue = outputQueue.finally(async () => {
-      const r = typeof fn === 'function' ? await fn() : fn;
-      typeof r === 'string' ? task.appendOutput(r) : task.appendOutput(...r);
-    });
-    exitBlockers.add(outputQueue);
-    return outputQueue;
-  };
-  const enqueueExitBlocker = <T>(prom: Promise<T>): Promise<T> => {
-    exitBlockers.add(prom);
-    prom.finally(() => exitBlockers.delete(prom));
-    return prom;
-  };
+        scanner.onOtherOutput(str => {
+            const tItem = tests.get('DOTNETMC_T224')
 
-  let lastTest: vscode.TestItem | undefined;
-  let ranAnyTest = false;
-
-  try {
-    if (cancellation.isCancellationRequested) {
-      return;
-    }
-
-    await new Promise<void>(resolve => {
-      cancellation.onCancellationRequested(() => {
-        resolve();
-      });
-
-      let currentTest: vscode.TestItem | undefined;
-
-      scanner.onRunnerError(err => {
-        enqueueOutput(err + crlf);
-        resolve();
-      });
-
-      scanner.onOtherOutput(str => {
-        const tItem = tests.get('DOTNETMC_T224')
-
-        if (tItem) {
-            try {
-                skippedTests.delete(tItem);
-            } catch {
-                
+            if (tItem) {
+                try {
+                    skippedTests.delete(tItem);
+                } catch {
+                    
+                }
+                task.passed(tItem, 1000)
             }
-            task.passed(tItem, 1000)
-        }
-        const match = spdlogRe.exec(str);
-        if (!match) {
-          enqueueOutput(str + crlf);
-          return;
-        }
-
-        const logLocation = store.getSourceLocation(match[2], Number(match[3]));
-        const logContents = replaceAllLocations(store, match[1]);
-        const test = currentTest;
-
-        enqueueOutput(() =>
-          Promise.all([logLocation, logContents]).then(([location, contents]) => [
-            contents + crlf,
-            location,
-            test,
-          ])
-        );
-      });
-
-      scanner.onKTAutoEvent(evt => {
-        const testId = evt[0]
-        const eventData = evt[1]
-        const tItem = tests.get(testId)
-
-        if (tItem) {
-            skippedTests.delete(tItem);
-
-            if (eventData._request.includes('****** Ending Test Case ******')) {
-                console.log('Test ' + testId + ' Passed')
-                task.passed(tItem, eventData._execution_time * 1000)
-            }
-        }
-
-        const match = spdlogRe.exec(eventData._request);
-        if (!match) {
-          enqueueOutput(eventData._request + crlf);
-          return;
-        }
-      })
-
-      scanner.onMochaEvent(evt => {
-        switch (evt[0]) {
-          case MochaEvent.Start:
-            break; // no-op
-          case MochaEvent.TestStart:
-            currentTest = tests.get(evt[1].fullTitle)!;
-            skippedTests.delete(currentTest);
-            task.started(currentTest);
-            ranAnyTest = true;
-            break;
-          case MochaEvent.Pass:
-            {
-              const title = evt[1].fullTitle;
-              const tcase = tests.get(title);
-              enqueueOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
-              if (tcase) {
-                lastTest = tcase;
-                task.passed(tcase, evt[1].duration);
-                tests.delete(title);
-              }
-            }
-            break;
-          case MochaEvent.Fail:
-            {
-              const {
-                err,
-                stack,
-                duration,
-                expected,
-                expectedJSON,
-                actual,
-                actualJSON,
-                snapshotPath,
-                fullTitle: id,
-              } = evt[1];
-              let tcase = tests.get(id);
-              // report failures on hook to the last-seen test, or first test if none run yet
-              if (!tcase && id.includes('hook for')) {
-                tcase = lastTest ?? tests.values().next().value;
-              }
-
-              enqueueOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
-              const rawErr = stack || err;
-              const locationsReplaced = replaceAllLocations(store, forceCRLF(rawErr));
-              if (rawErr) {
-                enqueueOutput(async () => [await locationsReplaced, undefined, tcase]);
-              }
-
-              if (!tcase) {
+            const match = spdlogRe.exec(str);
+            if (!match) {
+                enqueueOutput(str + crlf);
                 return;
-              }
+            }
 
-              tests.delete(id);
+            const logLocation = store.getSourceLocation(match[2], Number(match[3]));
+            const logContents = replaceAllLocations(store, match[1]);
+            const test = currentTest;
 
-              const hasDiff =
-                actual !== undefined &&
-                expected !== undefined &&
-                (expected !== '[undefined]' || actual !== '[undefined]');
-              const testFirstLine =
-                tcase.range &&
-                new vscode.Location(
-                  tcase.uri!,
-                  new vscode.Range(
-                    tcase.range.start,
-                    new vscode.Position(tcase.range.start.line, 100)
-                  )
-                );
+            enqueueOutput(() =>
+            Promise.all([logLocation, logContents]).then(([location, contents]) => [
+                contents + crlf,
+                location,
+                test,
+            ])
+            );
+        });
 
-              enqueueExitBlocker(
-                (async () => {
-                  const location = await tryDeriveStackLocation(store, rawErr, tcase!);
-                  let message: vscode.TestMessage;
+        scanner.onKTAutoEvent(evt => {
+            const testId = evt[0]
+            const eventData = evt[1]
+            const tItem = tests.get(testId)
 
-                  if (hasDiff) {
-                    message = new vscode.TestMessage(tryMakeMarkdown(err));
-                    message.actualOutput = outputToString(actual);
-                    message.expectedOutput = outputToString(expected);
-                    if (snapshotPath) {
-                      message.contextValue = 'isSelfhostSnapshotMessage';
-                      message.expectedOutput += snapshotComment + snapshotPath;
+            if (tItem) {
+                skippedTests.delete(tItem);
+
+                if (eventData._event_type == 33) {
+                    const parsed = JSON.parse(eventData._return_values[0]);
+
+                    if (parsed[0] == 1) {
+                        task.passed(tItem, parsed[1])
+                    } else {
+                        const msg = new TestMessage('Test Failed');
+                        task.failed(tItem, msg, parsed[1])
                     }
 
-                    attachTestMessageMetadata(message, {
-                      expectedValue: expectedJSON,
-                      actualValue: actualJSON,
-                    });
-                  } else {
-                    message = new vscode.TestMessage(
-                      stack ? await sourcemapStack(store, stack) : await locationsReplaced
-                    );
-                  }
-
-                  message.location = location ?? testFirstLine;
-                  task.failed(tcase!, message, duration);
-                })()
-              );
+                }
             }
-            break;
-          case MochaEvent.End:
-            resolve();
-            break;
-        }
-      });
-    });
-    await Promise.all([...exitBlockers]);
 
-    // no tests? Possible crash, show output:
-    if (!ranAnyTest) {
-      await vscode.commands.executeCommand('testing.showMostRecentOutput');
+            const match = spdlogRe.exec(eventData._request);
+            if (!match) {
+                task.appendOutput(eventData._request + crlf)
+                // enqueueOutput(eventData._request + crlf);
+                return;
+            }
+        })
+
+        scanner.onMochaEvent(evt => {
+            switch (evt[0]) {
+            case MochaEvent.Start:
+                break; // no-op
+            case MochaEvent.TestStart:
+                currentTest = tests.get(evt[1].fullTitle)!;
+                skippedTests.delete(currentTest);
+                task.started(currentTest);
+                ranAnyTest = true;
+                break;
+            case MochaEvent.Pass:
+                {
+                const title = evt[1].fullTitle;
+                const tcase = tests.get(title);
+                enqueueOutput(` ${styles.green.open}√${styles.green.close} ${title}\r\n`);
+                if (tcase) {
+                    lastTest = tcase;
+                    task.passed(tcase, evt[1].duration);
+                    tests.delete(title);
+                }
+                }
+                break;
+            case MochaEvent.Fail:
+                {
+                const {
+                    err,
+                    stack,
+                    duration,
+                    expected,
+                    expectedJSON,
+                    actual,
+                    actualJSON,
+                    snapshotPath,
+                    fullTitle: id,
+                } = evt[1];
+                let tcase = tests.get(id);
+                // report failures on hook to the last-seen test, or first test if none run yet
+                if (!tcase && id.includes('hook for')) {
+                    tcase = lastTest ?? tests.values().next().value;
+                }
+
+                enqueueOutput(`${styles.red.open} x ${id}${styles.red.close}\r\n`);
+                const rawErr = stack || err;
+                const locationsReplaced = replaceAllLocations(store, forceCRLF(rawErr));
+                if (rawErr) {
+                    enqueueOutput(async () => [await locationsReplaced, undefined, tcase]);
+                }
+
+                if (!tcase) {
+                    return;
+                }
+
+                tests.delete(id);
+
+                const hasDiff =
+                    actual !== undefined &&
+                    expected !== undefined &&
+                    (expected !== '[undefined]' || actual !== '[undefined]');
+                const testFirstLine =
+                    tcase.range &&
+                    new vscode.Location(
+                    tcase.uri!,
+                    new vscode.Range(
+                        tcase.range.start,
+                        new vscode.Position(tcase.range.start.line, 100)
+                    )
+                    );
+
+                enqueueExitBlocker(
+                    (async () => {
+                    const location = await tryDeriveStackLocation(store, rawErr, tcase!);
+                    let message: vscode.TestMessage;
+
+                    if (hasDiff) {
+                        message = new vscode.TestMessage(tryMakeMarkdown(err));
+                        message.actualOutput = outputToString(actual);
+                        message.expectedOutput = outputToString(expected);
+                        if (snapshotPath) {
+                        message.contextValue = 'isSelfhostSnapshotMessage';
+                        message.expectedOutput += snapshotComment + snapshotPath;
+                        }
+
+                        attachTestMessageMetadata(message, {
+                        expectedValue: expectedJSON,
+                        actualValue: actualJSON,
+                        });
+                    } else {
+                        message = new vscode.TestMessage(
+                        stack ? await sourcemapStack(store, stack) : await locationsReplaced
+                        );
+                    }
+
+                    message.location = location ?? testFirstLine;
+                    task.failed(tcase!, message, duration);
+                    })()
+                );
+                }
+                break;
+            case MochaEvent.End:
+                resolve();
+                break;
+            }
+        });
+        });
+        await Promise.all([...exitBlockers]);
+
+        // no tests? Possible crash, show output:
+        if (!ranAnyTest) {
+        await vscode.commands.executeCommand('testing.showMostRecentOutput');
+        }
+    } catch (e) {
+        task.appendOutput((e as Error).stack || (e as Error).message);
+    } finally {
+        scanner.dispose();
+        for (const test of skippedTests) {
+        task.skipped(test);
+        }
+        task.end();
     }
-  } catch (e) {
-    task.appendOutput((e as Error).stack || (e as Error).message);
-  } finally {
-    scanner.dispose();
-    for (const test of skippedTests) {
-      task.skipped(test);
-    }
-    task.end();
-  }
 }
 
 const spdlogRe = /"(.+)", source: (file:\/\/\/.*?)+ \(([0-9]+)\)/;
