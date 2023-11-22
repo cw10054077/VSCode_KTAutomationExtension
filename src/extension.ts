@@ -3,18 +3,20 @@
  *--------------------------------------------------------*/
 
 import * as vscode from 'vscode';
+import { DocumentSelector } from 'vscode';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
+import { GoCodeLensProvider, NoteComment } from './inlineTestInfo';
 import { registerSnapshotUpdate } from './snapshot';
 import { scanTestOutput } from './testOutputScanner';
 import {
-    buildTree,
-    clearFileDiagnostics,
-    guessWorkspaceFolder,
-    itemData,
     TestCase,
     TestFile,
     TestSuite,
     VSCodeTest,
+    buildTree,
+    clearFileDiagnostics,
+    guessWorkspaceFolder,
+    itemData,
 } from './testTree';
 import { VSCodeTestRunner } from './vscodeTestRunner';
 
@@ -29,10 +31,87 @@ const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
 
 type FileChangeEvent = { uri: vscode.Uri; removed: boolean };
 
+export async function testSnippet() {
+    const insertLocation = new vscode.Range(2, 0, 3, 0);
+    const snipper = new vscode.SnippetString('snippet string');
+
+    // vscode.window.showOpenDialog(undefined)
+    
+    // Inserts text into the document
+    vscode.window.activeTextEditor?.insertSnippet(snipper, insertLocation);
+
+}
+
+function replyNote(reply: vscode.CommentReply) {
+    const thread = reply.thread;
+    const newComment = new NoteComment(reply.text, vscode.CommentMode.Preview, { name: 'vscode' }, thread, thread.comments.length ? 'canDelete' : undefined);
+    if (thread.contextValue === 'draft') {
+        newComment.label = 'pending';
+    }
+
+    thread.comments = [...thread.comments, newComment];
+}
+
+
 // Primary method that executes when extension is activated. Will only be ran once (per session).
 // Extensions can be activated by conditions set in package.json under "activationEvents".
 // "*" will cause extension to activate on startup.
 export async function activate(context: vscode.ExtensionContext) {
+
+    // TEST COMMENTS
+
+    // const commentCtrl = vscode.comments.createCommentController('test-commenter', 'Comment Tests with Test Info');
+    // context.subscriptions.push(commentCtrl);
+
+    // commentCtrl.commentingRangeProvider = {
+    //     provideCommentingRanges: (document: vscode.TextDocument, token: vscode.CancellationToken) => {
+    //         const lineCount = document.lineCount;
+    //         return [new vscode.Range(0, 0, lineCount - 1, 0)];
+    //     }
+    // }
+
+    // context.subscriptions.push(vscode.commands.registerCommand('testnotes.createNote', (reply: vscode.CommentReply) => {
+    //     replyNote(reply);
+    // }));
+
+	// context.subscriptions.push(vscode.commands.registerCommand('testnotes.saveNote', (comment: NoteComment) => {
+	// 	if (!comment.parent) {
+	// 		return;
+	// 	}
+
+	// 	comment.parent.comments = comment.parent.comments.map(cmt => {
+	// 		if ((cmt as NoteComment).id === comment.id) {
+	// 			(cmt as NoteComment).savedBody = cmt.body;
+	// 			cmt.mode = vscode.CommentMode.Preview;
+	// 		}
+
+	// 		return cmt;
+	// 	});
+	// }));
+
+    // context.subscriptions.push(vscode.commands.registerCommand('testnotes.dispose', () => {
+	// 	commentCtrl.dispose();
+	// }));
+
+
+    // testCmt.state
+
+    
+    // /TEST COMMENTS
+
+    // Register a defined function (testSnippet()) to a vscode command (extension.testSnippet)
+    // context.subscriptions.push(
+    //     vscode.commands.registerCommand("extension.testSnippet", testSnippet)
+    // )
+
+    // CODE LENS
+
+    const sel: DocumentSelector = { scheme: 'file', language: 'python' };
+    context.subscriptions.push(
+        vscode.languages.registerCodeLensProvider(
+            sel, new GoCodeLensProvider()));
+
+    // CODE LENS
 
     // Create Test Controller. Main object to handle test extension
     const ctrl = vscode.tests.createTestController('selfhost-test-controller', 'VS Code Tests');
@@ -163,9 +242,14 @@ export async function activate(context: vscode.ExtensionContext) {
     function updateNodeForDocument(e: vscode.TextDocument) {
         const node = getOrCreateFile(ctrl, e.uri);
         const data = node && itemData.get(node);
+        // let testNodes: PyParser.Class[] | undefined;
         if (data instanceof TestFile) {
             data.updateFromContents(ctrl, e.getText(), node!);
         }
+        // TEST COMMENTS
+        // if (testNodes != undefined) {
+        //     generateTestStepComment(commentCtrl, e, testNodes);
+        // }
     }
 
     // Update Test Tree for any currently open documents.
@@ -190,6 +274,7 @@ export async function activate(context: vscode.ExtensionContext) {
         registerSnapshotUpdate(ctrl),
         new FailingDeepStrictEqualAssertFixer()
     );
+
 }
 
 export function deactivate() {

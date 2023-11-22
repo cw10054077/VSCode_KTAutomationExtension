@@ -14,7 +14,7 @@ import { TestOutputScanner } from './testOutputScanner';
  * From MDN
  * @see https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions#Escaping
  */
-const escapeRe = (s: string) => s.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
+// const escapeRe = (s: string) => s.replace(/[.*+\-?^${}()|[\]\\]/g, '\\$&');
 
 const DEBUGPY_HOST = 'localhost';
 const DEBUGPY_PORT = 5678;
@@ -70,6 +70,7 @@ export class VSCodeTestRunner {
      * Run the Automation Framework with the tests contained within filter. 
      */
     public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+        console.log(baseArgs);
         const pythonApi: PythonExtension = await PythonExtension.api();
         const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
         const testList = getTestIDsFromTestItemTree(filter);
@@ -88,6 +89,7 @@ export class VSCodeTestRunner {
     }
 
     public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+        console.log(baseArgs);
         const server = this.createWaitServer();
 
         const testList = getTestIDsFromTestItemTree(filter);

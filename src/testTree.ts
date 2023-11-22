@@ -146,7 +146,7 @@ export class TestFile {
         controller: vscode.TestController,
         content: string,
         file: vscode.TestItem
-    ) {
+    ):PyParser.Class[] | undefined {
         try {
 
             // Parse raw python source into a representation of it's classes, methods, etc.
@@ -155,6 +155,7 @@ export class TestFile {
             // Find nodes that are classes and extend the class TestCase
             // The highlighted error says that type cannot be 'arg', but the error is incorrect.
             const pythonArray: PyParser.Class[] = PyParser.walk(pythonTree)
+                // @ts-expect-error
                 .filter(node => (node.type == 'class' && node.extends[0].type == 'arg' && node.extends[0].actual.id == 'TestCase'))
                 .map(node => { return node as PyParser.Class });
 
@@ -179,9 +180,12 @@ export class TestFile {
 
             file.error = undefined;
             this.hasBeenRead = true;
+
+            return pythonArray;
         } catch (e) {
             file.error = String((e as Error).stack || (e as Error).message);
         }
+        return undefined;
     }
 }
 
@@ -194,6 +198,7 @@ export abstract class TestConstruct {
         parent?: TestConstruct
     ) {
         this.fullName = name;
+        console.log(parent);
         // this.fullName = parent ? `${parent.fullName} ${name}` : name;
     }
 }

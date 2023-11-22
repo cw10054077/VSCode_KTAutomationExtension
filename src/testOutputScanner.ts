@@ -379,7 +379,7 @@ export class TestOutputScanner implements vscode.Disposable {
     } finally {
         scanner.dispose();
         for (const test of skippedTests) {
-        task.skipped(test);
+            task.skipped(test);
         }
         task.end();
     }

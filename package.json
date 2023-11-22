@@ -14,10 +14,70 @@
   "categories": [
     "Other"
   ],
+  "capabilities": {
+    "codeLensProvider": {
+        "resolveProvider": "true"
+    }
+  },
   "activationEvents": [
     "workspaceContains:src/vs/loader.js",
     "*"
   ],
+  "contributes": {
+    "commands": [
+        {
+            "command": "extension.testSnippet",
+            "title": "test snippet"
+        },
+        {
+            "command": "testnotes.createNote",
+            "title": "Create Note"
+        },
+        {
+            "command": "testnotes.saveNote",
+            "title": "Save Note"
+        },
+        {
+            "command": "testnotes.dispose",
+            "title": "Remove All Notes"
+        }
+    ],
+    "menus": {
+        "comments/commentThread/context": [
+            {
+                "command": "testnotes.createNote",
+                "group": "inline",
+                "when": "commentController == test-commenter && commentThreadIsEmpty"
+            }
+        ],
+        "comments/comment/context": [
+            {
+                "command": "testnotes.saveNote",
+                "group": "inline@2",
+                "when": "commentController == test-commenter"
+            }
+        ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "test",
+          "title": "KT Test Explorer",
+          "icon": "icon.png"
+        }
+      ]
+    },
+    "views": {
+      "test": [
+        {
+          "id": "selfhost-test-controller",
+          "name": "KT Automation Framework View",
+          "icon": "icon.png",
+          "contextualTitle": "KT Test Explorer"
+        }
+      ]
+    }
+  },
   "workspaceTrust": {
     "request": "onDemand",
     "description": "Trust is required to execute tests in the workspace."
@@ -63,12 +123,15 @@
     "webpack-cli": "^5.0.1"
   },
   "dependencies": {
+    "@azure/identity": "^4.0.0",
+    "@azure/keyvault-secrets": "^4.7.0",
     "@jridgewell/trace-mapping": "^0.3.17",
     "@qoretechnologies/python-parser": "^0.4.10",
     "@types/vscode": "^1.84.0",
     "@vscode/python-extension": "^1.0.5",
     "ansi-styles": "^6.2.1",
     "js-base64": "^3.7.3",
+    "node-fetch": "^3.3.2",
     "split2": "^4.1.0",
     "typescript": "^4.9.3"
   },
