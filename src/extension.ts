@@ -3,9 +3,8 @@
  *--------------------------------------------------------*/
 
 import * as vscode from 'vscode';
-import { DocumentSelector } from 'vscode';
+import { FrameworkConfiguration, TestConfigViewProvider } from './configWebView';
 import { FailingDeepStrictEqualAssertFixer } from './failingDeepStrictEqualAssertFixer';
-import { GoCodeLensProvider, NoteComment } from './inlineTestInfo';
 import { registerSnapshotUpdate } from './snapshot';
 import { scanTestOutput } from './testOutputScanner';
 import {
@@ -24,10 +23,10 @@ const TEST_FOLDER = '_TestItem'
 const TEST_FILE_PATTERN = '_TestItem/TestCases/**/*.py';
 
 // Return the WorkspaceFolder of the project for a given test file.
-const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
-    (uri.path.endsWith('.py') && uri.path.includes(TEST_FOLDER))
-        ? vscode.workspace.getWorkspaceFolder(uri)
-        : undefined;
+// const getWorkspaceFolderForTestFile = (uri: vscode.Uri) =>
+//     (uri.path.endsWith('.py') && uri.path.includes(TEST_FOLDER))
+//         ? vscode.workspace.getWorkspaceFolder(uri)
+//         : undefined;
 
 type FileChangeEvent = { uri: vscode.Uri; removed: boolean };
 
@@ -42,21 +41,45 @@ export async function testSnippet() {
 
 }
 
-function replyNote(reply: vscode.CommentReply) {
-    const thread = reply.thread;
-    const newComment = new NoteComment(reply.text, vscode.CommentMode.Preview, { name: 'vscode' }, thread, thread.comments.length ? 'canDelete' : undefined);
-    if (thread.contextValue === 'draft') {
-        newComment.label = 'pending';
-    }
+export const frameworkConfigValues = new FrameworkConfiguration();
 
-    thread.comments = [...thread.comments, newComment];
-}
+// function replyNote(reply: vscode.CommentReply) {
+//     const thread = reply.thread;
+//     const newComment = new NoteComment(reply.text, vscode.CommentMode.Preview, { name: 'vscode' }, thread, thread.comments.length ? 'canDelete' : undefined);
+//     if (thread.contextValue === 'draft') {
+//         newComment.label = 'pending';
+//     }
+
+//     thread.comments = [...thread.comments, newComment];
+// }
 
 
 // Primary method that executes when extension is activated. Will only be ran once (per session).
 // Extensions can be activated by conditions set in package.json under "activationEvents".
 // "*" will cause extension to activate on startup.
 export async function activate(context: vscode.ExtensionContext) {
+
+    // Web View 
+
+    const webViewProvider = new TestConfigViewProvider(context.extensionUri);
+
+    context.subscriptions.push(
+        vscode.window.registerWebviewViewProvider(TestConfigViewProvider.viewType, webViewProvider)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('calicoColors.addColor', () => {
+            webViewProvider.addColor();
+        })
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('calicoColors.clearColors', () => {
+            webViewProvider.clearColors();
+        })
+    );
+
+    // /Web View
 
     // TEST COMMENTS
 
@@ -106,10 +129,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
     // CODE LENS
 
-    const sel: DocumentSelector = { scheme: 'file', language: 'python' };
-    context.subscriptions.push(
-        vscode.languages.registerCodeLensProvider(
-            sel, new GoCodeLensProvider()));
+    // const sel: DocumentSelector = { scheme: 'file', language: 'python' };
+    // context.subscriptions.push(
+    //     vscode.languages.registerCodeLensProvider(
+    //         sel, new GoCodeLensProvider()));
 
     // CODE LENS
 

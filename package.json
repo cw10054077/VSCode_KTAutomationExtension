@@ -40,9 +40,27 @@
         {
             "command": "testnotes.dispose",
             "title": "Remove All Notes"
+        },
+        {
+            "command": "calicoColors.addColor",
+            "category": "Calico Colors",
+            "title": "Add Color"
+        },
+        {
+            "command": "calicoColors.clearColors",
+            "category": "Calico Colors",
+            "title": "Clear Colors",
+            "icon": "$(clear-all)"
         }
     ],
     "menus": {
+        "view/title": [
+            {
+                "command": "calicoColors.clearColors",
+                "group": "navigation",
+                "when": "view == calicoColors.colorsView"
+            }
+        ],
         "comments/commentThread/context": [
             {
                 "command": "testnotes.createNote",
@@ -58,22 +76,12 @@
             }
         ]
     },
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "test",
-          "title": "KT Test Explorer",
-          "icon": "icon.png"
-        }
-      ]
-    },
     "views": {
-      "test": [
+      "explorer": [
         {
-          "id": "selfhost-test-controller",
-          "name": "KT Automation Framework View",
-          "icon": "icon.png",
-          "contextualTitle": "KT Test Explorer"
+            "type": "webview",
+            "id": "calicoColors.colorsView",
+            "name": "KT Framework Config"
         }
       ]
     }

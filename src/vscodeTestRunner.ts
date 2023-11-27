@@ -8,6 +8,7 @@ import { promises as fs } from 'fs';
 import { AddressInfo, createServer } from 'net';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import { frameworkConfigValues } from './extension';
 import { TestOutputScanner } from './testOutputScanner';
 
 /**
@@ -70,26 +71,42 @@ export class VSCodeTestRunner {
      * Run the Automation Framework with the tests contained within filter. 
      */
     public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
-        console.log(baseArgs);
         const pythonApi: PythonExtension = await PythonExtension.api();
         const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
         const testList = getTestIDsFromTestItemTree(filter);
+        console.log('Test List')
+        console.log(testList)
 
         // Run the framework using the currently active python environment.
         // Pass in the testID's and other configurations.
         const runMain = spawn(
                 environmentPath.path,
-                [path.join(this.repoLocation.uri.fsPath, `main.py`), '-tests', JSON.stringify(testList)], 
+                [
+                    path.join(this.repoLocation.uri.fsPath, `main.py`), 
+                    '-vscode',
+                    '-vs-num-parallel', String(frameworkConfigValues.num_parallel),
+                    '-vs-tests', JSON.stringify(testList),
+                    '-vs-browser', frameworkConfigValues.browser,
+                    '-vs-environment', frameworkConfigValues.environment,
+                    '-vs-max-test-attempts', String(frameworkConfigValues.max_test_attempts),
+                    '-vs-max-event_attempts', String(frameworkConfigValues.max_event_attempts),
+                    '-vs-max-wait-time', String(frameworkConfigValues.max_wait_time),
+                    '-vs-report-to-zephyr',
+                    '-vs-run-local',
+                    '-vs-log-to-file',
+                    '-vs-log-level', String(frameworkConfigValues.log_level)
+                ], 
         {
             env: this.getEnvironment(),
             cwd: this.repoLocation.uri.fsPath
         });
 
+        console.log(runMain.spawnargs)
+
         return new TestOutputScanner(runMain, undefined);
     }
 
     public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
-        console.log(baseArgs);
         const server = this.createWaitServer();
 
         const testList = getTestIDsFromTestItemTree(filter);
@@ -100,7 +117,18 @@ export class VSCodeTestRunner {
         
         debugCmd = debugCmd.concat([
             path.join(this.repoLocation.uri.fsPath, `main.py`), 
-            '-tests', JSON.stringify(testList)
+            '-vscode',
+            '-vs-num-parallel', String(frameworkConfigValues.num_parallel),
+            '-vs-tests', JSON.stringify(testList),
+            '-vs-browser', frameworkConfigValues.browser,
+            '-vs-environment', frameworkConfigValues.environment,
+            '-vs-max-test-attempts', String(frameworkConfigValues.max_test_attempts),
+            '-vs-max-event_attempts', String(frameworkConfigValues.max_event_attempts),
+            '-vs-max-wait-time', String(frameworkConfigValues.max_wait_time),
+            '-vs-report-to-zephyr',
+            '-vs-run-local',
+            '-vs-log-to-file',
+            '-vs-log-level', String(frameworkConfigValues.log_level)
         ])
 
         const debugMain = spawn(

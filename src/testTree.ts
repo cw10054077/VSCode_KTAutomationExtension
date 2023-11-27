@@ -198,7 +198,7 @@ export abstract class TestConstruct {
         parent?: TestConstruct
     ) {
         this.fullName = name;
-        console.log(parent);
+        // console.log(parent);
         // this.fullName = parent ? `${parent.fullName} ${name}` : name;
     }
 }
