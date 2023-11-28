@@ -41,7 +41,8 @@ export class TestConfigViewProvider implements vscode.WebviewViewProvider {
         private readonly _extensionUri: vscode.Uri
     ) { }
 
-    public resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext<unknown>, token: vscode.CancellationToken): void | Thenable<void> {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    public resolveWebviewView(webviewView: vscode.WebviewView, _context: vscode.WebviewViewResolveContext<unknown>, _token: vscode.CancellationToken): void | Thenable<void> {
         this._view = webviewView;
 
         webviewView.webview.options = {
@@ -105,10 +106,6 @@ export class TestConfigViewProvider implements vscode.WebviewViewProvider {
         });
 
     }
-    // resolveWebviewView(webviewView: vscode.WebviewView, context: vscode.WebviewViewResolveContext<unknown>, token: vscode.CancellationToken): void | Thenable<void>;
-    // resolveWebviewView(webviewView: unknown, context: unknown, token: unknown): void | Thenable<void> {
-    //     throw new Error('Method not implemented.');
-    // }
 
 	public addColor() {
 		if (this._view) {

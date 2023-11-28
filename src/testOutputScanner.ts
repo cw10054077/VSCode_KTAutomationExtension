@@ -26,6 +26,33 @@ export const enum KTAutoEvent {
     SuiteEnd = 'suiteStop',
   }
 
+export const enum KTEventStatus {
+    NOT_SET = 0,
+    RETRYING = 2,
+    SUCCESS = 3,
+    RETRY_SUCCESS = 5,
+    FAILED = 6,
+    FAILED_TIMEOUT = 7
+}
+
+export const enum KTTestResult {
+    NOT_RAN = 0,
+    PASSED = 1,
+    SOFT_VERIFICATION_FAILURE = 2,
+    HARD_VERIFICATION_FAILURE = 3,
+    KNOWN_FAILURE_FAIL = 4,
+    KNOWN_FAILURE_PASSED = 5,
+    UNEXPECTED_ERROR = 6,
+    CLEANUP_FAILURE_FAIL = 7,
+    CLEANUP_FAILURE_PASS = 8
+}
+
+export interface KTException {
+    msg: string;
+    screen: string;
+    stracktrace: string[];
+}
+
 export interface IKTTestEvent {
     _name: string;
     _log_msg: { _msg_list: string[] };
@@ -34,10 +61,11 @@ export interface IKTTestEvent {
     _attempts: number;
     _execution_time: number;
     _start_time: number;
-    _exceptions: string[];
+    _exceptions: KTException[];
     _request: string;
     _return_values: string[]
   }
+
 
 export type KTEventTuple =
     | [string, IKTTestEvent]
@@ -240,28 +268,72 @@ export class TestOutputScanner implements vscode.Disposable {
             const eventData = evt[1]
             const tItem = tests.get(testId)
 
+            // ` ${styles.green.open}√${styles.green.close} ${title}\r\n`
+            const logPrefix = `${styles.blueBright.open}[${testId}]${styles.blueBright.close} `;
+            let stepPrefix = ` `;
+            let spacer = '     ';
+            for (let index = 0; index < testId.length; index++) {
+                spacer += ' '
+            }
+
             if (tItem) {
-                skippedTests.delete(tItem);
-
-                if (eventData._event_type == 33) {
-                    const parsed = JSON.parse(eventData._return_values[0]);
-
-                    if (parsed[0] == 1) {
-                        task.passed(tItem, parsed[1])
-                    } else {
-                        const msg = new TestMessage('Test Failed');
-                        task.failed(tItem, msg, parsed[1])
-                    }
-
+                switch (eventData._event_type) {
+                    case 32: // TEST_RUN_START
+                        skippedTests.delete(tItem);
+                        task.started(tItem);
+                        break;
+                    case 33: // TEST_RUN_END
+                        const [testStatus, executionTime] = JSON.parse(eventData._return_values[0])
+                        if (testStatus == KTTestResult.PASSED) {
+                            task.passed(tItem, executionTime);
+                        } else {
+                            task.failed(tItem, new TestMessage('Test Failed'), executionTime);
+                        }
+                        return;
+                    case 34: // STEP_START
+                        stepPrefix = `${styles.bgWhite.open}↳${styles.bgWhite.close}`;
+                        break;
+                    case 30: // ERROR
+                        return;
                 }
+
+                if (eventData._status == 6 || eventData._status == 7) {
+                    stepPrefix = `${styles.whiteBright.open}${styles.bgRed.open}X${styles.bgRed.close}${styles.whiteBright.close}`;
+                }
+
+                // Standard Log
+                task.appendOutput(logPrefix + stepPrefix + ` ` + eventData._log_msg._msg_list[0] + `  ${eventData._event_type}-${eventData._status}` + crlf);
+
+                // Log Exception msg if event failed
+                if (eventData._status == 6 || eventData._status == 7) {
+                    task.appendOutput(spacer + eventData._exceptions[0].msg + crlf);
+                }
+
+                // Log additional lines
+                if (eventData._log_msg._msg_list.length > 1) {
+                    for (let i = 1; i < eventData._log_msg._msg_list.length; i++) {
+                        task.appendOutput(spacer + stepPrefix + ` ` + eventData._log_msg._msg_list[i] + crlf);
+                    }
+                }
+
+                // if (eventData._event_type == 33) { 
+                //     const parsed = JSON.parse(eventData._return_values[0]);
+
+                //     if (parsed[0] == 1) {
+                //         task.passed(tItem, parsed[1])
+                //     } else {
+                //         const msg = new TestMessage('Test Failed');
+                //         task.failed(tItem, msg, parsed[1])
+                //     }
+
+                // }
             }
 
-            const match = spdlogRe.exec(eventData._request);
-            if (!match) {
-                task.appendOutput(eventData._request + crlf)
-                // enqueueOutput(eventData._request + crlf);
-                return;
-            }
+            // const match = spdlogRe.exec(eventData._request);
+            // if (!match) {
+            //     // enqueueOutput(eventData._request + crlf);
+            //     return;
+            // }
         })
 
         scanner.onMochaEvent(evt => {

@@ -70,7 +70,7 @@ export class VSCodeTestRunner {
     /**
      * Run the Automation Framework with the tests contained within filter. 
      */
-    public async run(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+    public async run(_baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
         const pythonApi: PythonExtension = await PythonExtension.api();
         const environmentPath = pythonApi.environments.getActiveEnvironmentPath();
         const testList = getTestIDsFromTestItemTree(filter);
@@ -106,7 +106,7 @@ export class VSCodeTestRunner {
         return new TestOutputScanner(runMain, undefined);
     }
 
-    public async debug(baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
+    public async debug(_baseArgs: ReadonlyArray<string>, filter?: ReadonlyArray<vscode.TestItem>) {
         const server = this.createWaitServer();
 
         const testList = getTestIDsFromTestItemTree(filter);
